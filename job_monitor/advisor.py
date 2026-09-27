@@ -1,15 +1,20 @@
 import json
+import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Literal
 
 import yaml
-from openai import OpenAI
+from openai import BadRequestError, OpenAI
 from pydantic import BaseModel, Field
 
 from .config import Config
 from .database import Database
+
+
+logger = logging.getLogger("job-monitor")
 
 
 class VacancyAssessment(BaseModel):
@@ -61,8 +66,40 @@ def compact_vacancy(vacancy: dict) -> dict:
         "published_at": vacancy["published_at"],
         "source": vacancy["channel_title"],
         "url": vacancy["telegram_url"] or (vacancy["links"][0] if vacancy["links"] else None),
-        "text": vacancy["text"][:8000],
+        "text": vacancy["text"][:6000],
     }
+
+
+def request_assessments(client: OpenAI, model: str, profile: dict, batch: list[dict]) -> list[VacancyAssessment]:
+    user_payload = {
+        "candidate_profile": profile,
+        "vacancies": [compact_vacancy(vacancy) for vacancy in batch],
+    }
+    try:
+        response = client.beta.chat.completions.parse(
+            model=model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+            ],
+            response_format=AssessmentBatch,
+        )
+    except BadRequestError as error:
+        if "json_validate_failed" not in str(error) or len(batch) == 1:
+            raise
+        middle = len(batch) // 2
+        logger.warning(
+            "Groq вернул некорректный JSON; дробим пакет из %d вакансий",
+            len(batch),
+        )
+        return request_assessments(client, model, profile, batch[:middle]) + request_assessments(
+            client, model, profile, batch[middle:]
+        )
+
+    parsed = response.choices[0].message.parsed
+    if parsed is None:
+        raise RuntimeError("Groq не вернул структурированный результат")
+    return parsed.assessments
 
 
 def analyze(config: Config, database: Database, *, reanalyze: bool = False) -> AnalysisRun:
@@ -83,32 +120,18 @@ def analyze(config: Config, database: Database, *, reanalyze: bool = False) -> A
     saved: list[dict] = []
     known_ids = {vacancy["id"] for vacancy in vacancies}
 
-    for batch in chunks(vacancies, config.analysis_batch_size):
-        user_payload = {
-            "candidate_profile": profile,
-            "vacancies": [compact_vacancy(vacancy) for vacancy in batch],
-        }
-        response = client.beta.chat.completions.parse(
-            model=config.ai_model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-            ],
-            response_format=AssessmentBatch,
-        )
-        parsed = response.choices[0].message.parsed
-        if parsed is None:
-            raise RuntimeError("Groq не вернул структурированный результат")
-
+    batches = list(chunks(vacancies, config.analysis_batch_size))
+    for batch_number, batch in enumerate(batches, start=1):
+        assessments = request_assessments(client, config.ai_model, profile, batch)
         batch_ids = {vacancy["id"] for vacancy in batch}
-        returned_ids = {item.message_row_id for item in parsed.assessments}
+        returned_ids = {item.message_row_id for item in assessments}
         if returned_ids != batch_ids or not returned_ids <= known_ids:
             raise RuntimeError(
                 f"Groq вернул неверный набор ID: ожидались {sorted(batch_ids)}, "
                 f"получены {sorted(returned_ids)}"
             )
 
-        for item in parsed.assessments:
+        for item in assessments:
             data = item.model_dump()
             database.save_analysis(item.message_row_id, data, config.ai_model)
             vacancy = next(v for v in batch if v["id"] == item.message_row_id)
@@ -117,6 +140,15 @@ def analyze(config: Config, database: Database, *, reanalyze: bool = False) -> A
             )
             data["source"] = vacancy["channel_title"]
             saved.append(data)
+
+        if batch_number < len(batches):
+            logger.info(
+                "Пакет %d/%d готов; пауза %d секунд для лимита Groq",
+                batch_number,
+                len(batches),
+                config.analysis_pause_seconds,
+            )
+            time.sleep(config.analysis_pause_seconds)
 
     return AnalysisRun(considered=len(vacancies), assessments=saved)
 

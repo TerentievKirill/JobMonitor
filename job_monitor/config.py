@@ -27,6 +27,7 @@ class Config:
     analysis_hours_back: int
     analysis_limit: int
     analysis_batch_size: int
+    analysis_pause_seconds: int
 
     @classmethod
     def load(cls) -> "Config":
@@ -57,7 +58,8 @@ class Config:
             report_path=Path(os.getenv("REPORT_PATH", "data/daily_report.md")),
             analysis_hours_back=int(os.getenv("ANALYSIS_HOURS_BACK", "36")),
             analysis_limit=int(os.getenv("ANALYSIS_LIMIT", "50")),
-            analysis_batch_size=int(os.getenv("ANALYSIS_BATCH_SIZE", "10")),
+            analysis_batch_size=int(os.getenv("ANALYSIS_BATCH_SIZE", "3")),
+            analysis_pause_seconds=int(os.getenv("ANALYSIS_PAUSE_SECONDS", "20")),
         )
 
     def validate_telegram(self) -> None:
@@ -86,6 +88,7 @@ class Config:
             ("ANALYSIS_HOURS_BACK", self.analysis_hours_back),
             ("ANALYSIS_LIMIT", self.analysis_limit),
             ("ANALYSIS_BATCH_SIZE", self.analysis_batch_size),
+            ("ANALYSIS_PAUSE_SECONDS", self.analysis_pause_seconds),
         ):
             if value <= 0:
                 raise RuntimeError(f"{name} должен быть больше нуля")
