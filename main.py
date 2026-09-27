@@ -11,7 +11,7 @@ from job_monitor.config import Config
 from job_monitor.advisor import analyze, write_report
 from job_monitor.database import Database
 from job_monitor.service import run_forever
-from job_monitor.telegram import authorize, collect_once
+from job_monitor.telegram import authorize, collect_once, export_source_links
 
 
 def configure_logging(level: str) -> None:
@@ -55,6 +55,16 @@ def main() -> None:
     subparsers.add_parser("collect-once", help="Выполнить один сбор")
     subparsers.add_parser("run", help="Запустить постоянный сбор")
     subparsers.add_parser("stats", help="Показать статистику SQLite")
+    sources_parser = subparsers.add_parser(
+        "sources", help="Сохранить публичные ссылки на источники из Telegram-папки"
+    )
+    sources_parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=Path("data/telegram_sources.txt"),
+        help="Файл результата (по умолчанию data/telegram_sources.txt)",
+    )
     analyze_parser = subparsers.add_parser("analyze", help="Оценить новые вакансии через Groq")
     analyze_parser.add_argument(
         "--reanalyze", action="store_true", help="Повторно оценить вакансии за выбранный период"
@@ -87,6 +97,13 @@ def main() -> None:
             print("Сборщик остановлен")
     elif args.command == "stats":
         print(json.dumps(database.statistics(), ensure_ascii=False, indent=2))
+    elif args.command == "sources":
+        stats = asyncio.run(export_source_links(config, args.output))
+        print(f"Источников в папке: {stats['sources']}")
+        print(f"Публичных ссылок: {stats['public']}")
+        if stats["private"]:
+            print(f"Без публичной ссылки: {stats['private']}")
+        print(f"Результат: {args.output.resolve()}")
     elif args.command == "analyze":
         run = analyze(config, database, reanalyze=args.reanalyze)
         write_report(run, config.report_path)

@@ -3,6 +3,7 @@ import getpass
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import qrcode
@@ -44,6 +45,11 @@ def extract_links(message: Any) -> list[str]:
 def public_message_url(entity: Any, message_id: int) -> str | None:
     username = getattr(entity, "username", None)
     return f"https://t.me/{username}/{message_id}" if username else None
+
+
+def public_source_url(entity: Any) -> str | None:
+    username = getattr(entity, "username", None)
+    return f"https://t.me/{username}" if username else None
 
 
 async def authorize(client: TelegramClient, config: Config) -> None:
@@ -112,6 +118,37 @@ async def get_folder_entities(
     if not entities:
         raise RuntimeError("В папке нет явно добавленных каналов или групп")
     return entities
+
+
+async def export_source_links(config: Config, output: Path) -> dict[str, int]:
+    """Save public links for sources explicitly included in the Telegram folder."""
+    config.validate_telegram()
+    config.session_path.parent.mkdir(parents=True, exist_ok=True)
+    client = TelegramClient(str(config.session_path), config.api_id, config.api_hash)
+
+    try:
+        await authorize(client, config)
+        entities = await get_folder_entities(client, config.folder_name)
+        links = sorted(
+            {
+                url
+                for entity in entities
+                if (url := public_source_url(entity)) is not None
+            },
+            key=str.casefold,
+        )
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            "".join(f"{link}\n" for link in links),
+            encoding="utf-8",
+        )
+        return {
+            "sources": len(entities),
+            "public": len(links),
+            "private": len(entities) - len(links),
+        }
+    finally:
+        await client.disconnect()
 
 
 def message_record(entity: Any, message: Any, store_raw_json: bool) -> dict[str, Any]:
