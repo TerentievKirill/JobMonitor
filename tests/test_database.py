@@ -89,3 +89,8 @@ def test_analysis_is_saved_and_vacancy_is_not_selected_again(tmp_path: Path):
 
     assert database.vacancies_for_analysis(since=since, limit=10) == []
     assert len(database.vacancies_for_analysis(since=since, limit=10, reanalyze=True)) == 1
+
+    with database.connect() as connection:
+        saved = connection.execute("SELECT * FROM vacancy_analysis").fetchone()
+    assert saved["language"] == "unknown"
+    assert saved["contacts_json"] == "[]"

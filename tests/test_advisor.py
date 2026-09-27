@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from job_monitor.advisor import AnalysisRun, load_profile, write_report
+from job_monitor.advisor import AnalysisRun, load_profile, obvious_contacts, write_report
 
 
 def test_profile_is_valid():
@@ -35,6 +35,8 @@ def test_markdown_report_orders_best_score_first(tmp_path: Path):
                 "reason": "Подходит основной стек",
                 "source": "Channel B",
                 "url": "https://example.com/job",
+                "contacts": ["@recruiter"],
+                "application_links": ["https://example.com/apply"],
             },
         ],
     )
@@ -44,3 +46,18 @@ def test_markdown_report_orders_best_score_first(tmp_path: Path):
 
     assert "Стоит откликнуться: **1**" in text
     assert text.index("Senior QA Automation") < text.index("QA Engineer")
+    assert "[@recruiter](https://t.me/recruiter)" in text
+    assert "[ссылка 1](https://example.com/apply)" in text
+
+
+def test_obvious_contacts_extracts_telegram_and_email():
+    vacancy = {
+        "text": "Писать @yana_hires или qa@example.com",
+        "links": ["https://t.me/yana_hires", "https://example.com/job"],
+        "telegram_url": "https://t.me/channel/100",
+    }
+    assert obvious_contacts(vacancy) == [
+        "@yana_hires",
+        "https://t.me/yana_hires",
+        "qa@example.com",
+    ]

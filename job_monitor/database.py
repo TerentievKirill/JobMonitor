@@ -63,6 +63,9 @@ CREATE TABLE IF NOT EXISTS vacancy_analysis (
     matches_json TEXT NOT NULL,
     gaps_json TEXT NOT NULL,
     reason TEXT NOT NULL,
+    language TEXT NOT NULL DEFAULT 'unknown',
+    contacts_json TEXT NOT NULL DEFAULT '[]',
+    application_links_json TEXT NOT NULL DEFAULT '[]',
     model TEXT NOT NULL,
     analyzed_at TEXT NOT NULL
 );
@@ -92,7 +95,7 @@ FROM messages
 WHERE classification = 'vacancy'
   AND duplicate_of_id IS NULL;
 
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 """
 
 
@@ -127,6 +130,19 @@ class Database:
         with self.connect() as connection:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(SCHEMA)
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(vacancy_analysis)")
+            }
+            migrations = {
+                "language": "ALTER TABLE vacancy_analysis ADD COLUMN language TEXT NOT NULL DEFAULT 'unknown'",
+                "contacts_json": "ALTER TABLE vacancy_analysis ADD COLUMN contacts_json TEXT NOT NULL DEFAULT '[]'",
+                "application_links_json": "ALTER TABLE vacancy_analysis ADD COLUMN application_links_json TEXT NOT NULL DEFAULT '[]'",
+            }
+            for column, statement in migrations.items():
+                if column not in columns:
+                    connection.execute(statement)
+            connection.execute("PRAGMA user_version = 3")
 
     def last_message_id(self, channel_id: int) -> int | None:
         with self.connect() as connection:
@@ -292,8 +308,9 @@ class Database:
                 """
                 INSERT INTO vacancy_analysis (
                     message_row_id, decision, score, title, summary,
-                    matches_json, gaps_json, reason, model, analyzed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    matches_json, gaps_json, reason, language, contacts_json,
+                    application_links_json, model, analyzed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(message_row_id) DO UPDATE SET
                     decision = excluded.decision,
                     score = excluded.score,
@@ -302,6 +319,9 @@ class Database:
                     matches_json = excluded.matches_json,
                     gaps_json = excluded.gaps_json,
                     reason = excluded.reason,
+                    language = excluded.language,
+                    contacts_json = excluded.contacts_json,
+                    application_links_json = excluded.application_links_json,
                     model = excluded.model,
                     analyzed_at = excluded.analyzed_at
                 """,
@@ -314,6 +334,9 @@ class Database:
                     json.dumps(analysis["matches"], ensure_ascii=False),
                     json.dumps(analysis["gaps"], ensure_ascii=False),
                     analysis["reason"],
+                    analysis.get("language", "unknown"),
+                    json.dumps(analysis.get("contacts", []), ensure_ascii=False),
+                    json.dumps(analysis.get("application_links", []), ensure_ascii=False),
                     model,
                     datetime.now(timezone.utc).isoformat(),
                 ),

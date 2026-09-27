@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -26,6 +27,9 @@ class VacancyAssessment(BaseModel):
     matches: list[str]
     gaps: list[str]
     reason: str
+    language: Literal["ru", "en", "other"]
+    contacts: list[str]
+    application_links: list[str]
 
 
 class AssessmentBatch(BaseModel):
@@ -44,7 +48,11 @@ Do not require a perfect keyword match. Transferable experience counts.
 Treat developing skills as acceptable gaps unless the vacancy explicitly requires deep production expertise.
 Use 'recommended' when applying is sensible, 'review' when a human must verify important details,
 and 'skip' only for a clear mismatch. Keep title, summary, matches, gaps, and reason concise.
-Return exactly one assessment for every supplied message_row_id and never invent requirements."""
+Detect the vacancy language. Write title, summary, matches, gaps, and reason in that same language:
+Russian vacancy means fully Russian assessment; English vacancy means English assessment.
+Extract contacts verbatim (Telegram usernames, emails, phone numbers) and application links.
+Do not invent or translate contacts and URLs. Return exactly one assessment for every supplied
+message_row_id and never invent requirements."""
 
 
 def load_profile(path: Path) -> dict:
@@ -66,8 +74,21 @@ def compact_vacancy(vacancy: dict) -> dict:
         "published_at": vacancy["published_at"],
         "source": vacancy["channel_title"],
         "url": vacancy["telegram_url"] or (vacancy["links"][0] if vacancy["links"] else None),
+        "links": vacancy["links"],
         "text": vacancy["text"][:6000],
     }
+
+
+def obvious_contacts(vacancy: dict) -> list[str]:
+    text = vacancy["text"]
+    contacts = set(re.findall(r"(?<![\w@])@[A-Za-z0-9_]{5,32}", text))
+    contacts.update(
+        re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
+    )
+    for link in vacancy["links"]:
+        if "t.me/" in link and link != vacancy["telegram_url"]:
+            contacts.add(link)
+    return sorted(contacts)
 
 
 def request_assessments(client: OpenAI, model: str, profile: dict, batch: list[dict]) -> list[VacancyAssessment]:
@@ -133,8 +154,9 @@ def analyze(config: Config, database: Database, *, reanalyze: bool = False) -> A
 
         for item in assessments:
             data = item.model_dump()
-            database.save_analysis(item.message_row_id, data, config.ai_model)
             vacancy = next(v for v in batch if v["id"] == item.message_row_id)
+            data["contacts"] = sorted(set(data["contacts"]) | set(obvious_contacts(vacancy)))
+            database.save_analysis(item.message_row_id, data, config.ai_model)
             data["url"] = vacancy["telegram_url"] or (
                 vacancy["links"][0] if vacancy["links"] else None
             )
@@ -196,6 +218,19 @@ def write_report(run: AnalysisRun, output: Path) -> None:
                     f"**Источник:** {item['source']}",
                 ]
             )
+            contacts = item.get("contacts", [])
+            if contacts:
+                formatted_contacts = [
+                    f"[{contact}](https://t.me/{contact[1:]})" if contact.startswith("@") else contact
+                    for contact in contacts
+                ]
+                lines.append(f"**Контакты:** {', '.join(formatted_contacts)}")
+            application_links = item.get("application_links", [])
+            if application_links:
+                lines.append(
+                    "**Отклик:** "
+                    + ", ".join(f"[ссылка {index}]({link})" for index, link in enumerate(application_links, 1))
+                )
             if item["url"]:
                 lines.append(f"**Ссылка:** {item['url']}")
             lines.extend(["", "---", ""])
