@@ -34,7 +34,7 @@ SQL-view `vacancies` содержит только сообщения, кото�
 
 ## Локальный запуск
 
-Нужен Python 3.11 или новее.
+Нужен Python 3.11 или новее, включая Python 3.14.
 
 ### Windows PowerShell
 
