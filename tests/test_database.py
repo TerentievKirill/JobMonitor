@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from job_monitor.database import Database
@@ -61,3 +62,30 @@ def test_rejected_message_is_stored_but_hidden_from_vacancies(tmp_path: Path):
     assert result.classification == "resume"
     assert database.statistics()["totals"]["messages"] == 1
     assert database.export_vacancies() == []
+
+
+def test_analysis_is_saved_and_vacancy_is_not_selected_again(tmp_path: Path):
+    database = Database(tmp_path / "test.db")
+    database.initialize()
+    database.insert_message(record(-1001, 1, "Senior QA Engineer. Требования: Python"))
+    since = datetime.now(timezone.utc) - timedelta(days=365)
+
+    selected = database.vacancies_for_analysis(since=since, limit=10)
+    assert len(selected) == 1
+
+    database.save_analysis(
+        selected[0]["id"],
+        {
+            "decision": "recommended",
+            "score": 85,
+            "title": "Senior QA Engineer",
+            "summary": "Подходит",
+            "matches": ["Python"],
+            "gaps": [],
+            "reason": "Совпадает основной стек",
+        },
+        "test-model",
+    )
+
+    assert database.vacancies_for_analysis(since=since, limit=10) == []
+    assert len(database.vacancies_for_analysis(since=since, limit=10, reanalyze=True)) == 1

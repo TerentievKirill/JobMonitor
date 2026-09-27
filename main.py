@@ -8,6 +8,7 @@ from pathlib import Path
 from telethon import TelegramClient
 
 from job_monitor.config import Config
+from job_monitor.advisor import analyze, write_report
 from job_monitor.database import Database
 from job_monitor.service import run_forever
 from job_monitor.telegram import authorize, collect_once
@@ -54,6 +55,16 @@ def main() -> None:
     subparsers.add_parser("collect-once", help="Выполнить один сбор")
     subparsers.add_parser("run", help="Запустить постоянный сбор")
     subparsers.add_parser("stats", help="Показать статистику SQLite")
+    analyze_parser = subparsers.add_parser("analyze", help="Оценить новые вакансии через Groq")
+    analyze_parser.add_argument(
+        "--reanalyze", action="store_true", help="Повторно оценить вакансии за выбранный период"
+    )
+    daily_parser = subparsers.add_parser(
+        "daily", help="Собрать вакансии, оценить их и создать отчёт"
+    )
+    daily_parser.add_argument(
+        "--reanalyze", action="store_true", help="Повторно оценить вакансии за выбранный период"
+    )
     export_parser = subparsers.add_parser("export", help="Экспортировать view vacancies")
     export_parser.add_argument(
         "-o", "--output", type=Path, default=Path("data/vacancies.json")
@@ -76,6 +87,17 @@ def main() -> None:
             print("Сборщик остановлен")
     elif args.command == "stats":
         print(json.dumps(database.statistics(), ensure_ascii=False, indent=2))
+    elif args.command == "analyze":
+        run = analyze(config, database, reanalyze=args.reanalyze)
+        write_report(run, config.report_path)
+        print(f"Проанализировано вакансий: {run.considered}")
+        print(f"Отчёт: {config.report_path.resolve()}")
+    elif args.command == "daily":
+        asyncio.run(collect_once(config, database))
+        run = analyze(config, database, reanalyze=args.reanalyze)
+        write_report(run, config.report_path)
+        print(f"Проанализировано вакансий: {run.considered}")
+        print(f"Отчёт: {config.report_path.resolve()}")
     elif args.command == "export":
         export_json(database, args.output)
 

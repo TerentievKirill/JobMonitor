@@ -1,0 +1,50 @@
+candidate:
+  target_roles:
+    - Senior QA Automation Engineer
+    - QA Automation Engineer
+    - SDET
+    - Senior QA Engineer
+  preferred_work:
+    - backend automation
+    - API testing
+    - end-to-end automation
+    - desktop application testing
+  strong_skills:
+    - Python
+    - pytest
+    - asyncio
+    - REST API
+    - WebSocket
+    - Docker
+    - GitLab CI/CD
+    - Allure
+    - PostgreSQL
+    - Kafka
+    - Redis
+  developing_skills:
+    - Playwright
+    - TypeScript
+  experience:
+    qa_background: extensive commercial QA experience
+    automation_level: senior
+    current_scope: 300+ automated tests and 15+ microservices
+  languages:
+    russian: native
+    english: A2
+  geography:
+    preferred:
+      - Cyprus with relocation
+      - worldwide remote
+      - Serbia with relocation
+      - Kazakhstan
+    relocation: true
+  preferences:
+    lead_role: false
+    manual_qa_allowed: true
+    mixed_manual_automation_allowed: true
+
+evaluation_rules:
+  recommended: Strong practical match; gaps are learnable and should not block an application.
+  review: Potentially relevant, but important conditions or requirements need manual checking.
+  skip: Clearly wrong profession, geography, seniority, language requirement, or core stack.
+  principle: Do not demand a perfect match. Recommend applying when the candidate can realistically do the job.

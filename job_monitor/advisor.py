@@ -1,0 +1,173 @@
+import json
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Iterable, Literal
+
+import yaml
+from openai import OpenAI
+from pydantic import BaseModel, Field
+
+from .config import Config
+from .database import Database
+
+
+class VacancyAssessment(BaseModel):
+    message_row_id: int
+    decision: Literal["recommended", "review", "skip"]
+    score: int = Field(ge=0, le=100)
+    title: str
+    summary: str
+    matches: list[str]
+    gaps: list[str]
+    reason: str
+
+
+class AssessmentBatch(BaseModel):
+    assessments: list[VacancyAssessment]
+
+
+@dataclass(frozen=True)
+class AnalysisRun:
+    considered: int
+    assessments: list[dict]
+
+
+SYSTEM_PROMPT = """You are a pragmatic job-search advisor for one QA automation engineer.
+Evaluate only whether each vacancy is worth this candidate's time.
+Do not require a perfect keyword match. Transferable experience counts.
+Treat developing skills as acceptable gaps unless the vacancy explicitly requires deep production expertise.
+Use 'recommended' when applying is sensible, 'review' when a human must verify important details,
+and 'skip' only for a clear mismatch. Keep title, summary, matches, gaps, and reason concise.
+Return exactly one assessment for every supplied message_row_id and never invent requirements."""
+
+
+def load_profile(path: Path) -> dict:
+    with path.open("r", encoding="utf-8") as source:
+        profile = yaml.safe_load(source)
+    if not isinstance(profile, dict) or "candidate" not in profile:
+        raise RuntimeError(f"Некорректный профиль: {path}")
+    return profile
+
+
+def chunks(items: list[dict], size: int) -> Iterable[list[dict]]:
+    for index in range(0, len(items), size):
+        yield items[index : index + size]
+
+
+def compact_vacancy(vacancy: dict) -> dict:
+    return {
+        "message_row_id": vacancy["id"],
+        "published_at": vacancy["published_at"],
+        "source": vacancy["channel_title"],
+        "url": vacancy["telegram_url"] or (vacancy["links"][0] if vacancy["links"] else None),
+        "text": vacancy["text"][:8000],
+    }
+
+
+def analyze(config: Config, database: Database, *, reanalyze: bool = False) -> AnalysisRun:
+    config.validate_analysis()
+    profile = load_profile(config.profile_path)
+    since = datetime.now(timezone.utc) - timedelta(hours=config.analysis_hours_back)
+    vacancies = database.vacancies_for_analysis(
+        since=since, limit=config.analysis_limit, reanalyze=reanalyze
+    )
+    if not vacancies:
+        return AnalysisRun(considered=0, assessments=[])
+
+    client = OpenAI(
+        api_key=config.groq_api_key,
+        base_url="https://api.groq.com/openai/v1",
+        timeout=180.0,
+    )
+    saved: list[dict] = []
+    known_ids = {vacancy["id"] for vacancy in vacancies}
+
+    for batch in chunks(vacancies, config.analysis_batch_size):
+        user_payload = {
+            "candidate_profile": profile,
+            "vacancies": [compact_vacancy(vacancy) for vacancy in batch],
+        }
+        response = client.beta.chat.completions.parse(
+            model=config.ai_model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+            ],
+            response_format=AssessmentBatch,
+        )
+        parsed = response.choices[0].message.parsed
+        if parsed is None:
+            raise RuntimeError("Groq не вернул структурированный результат")
+
+        batch_ids = {vacancy["id"] for vacancy in batch}
+        returned_ids = {item.message_row_id for item in parsed.assessments}
+        if returned_ids != batch_ids or not returned_ids <= known_ids:
+            raise RuntimeError(
+                f"Groq вернул неверный набор ID: ожидались {sorted(batch_ids)}, "
+                f"получены {sorted(returned_ids)}"
+            )
+
+        for item in parsed.assessments:
+            data = item.model_dump()
+            database.save_analysis(item.message_row_id, data, config.ai_model)
+            vacancy = next(v for v in batch if v["id"] == item.message_row_id)
+            data["url"] = vacancy["telegram_url"] or (
+                vacancy["links"][0] if vacancy["links"] else None
+            )
+            data["source"] = vacancy["channel_title"]
+            saved.append(data)
+
+    return AnalysisRun(considered=len(vacancies), assessments=saved)
+
+
+def write_report(run: AnalysisRun, output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    ordered = sorted(run.assessments, key=lambda item: item["score"], reverse=True)
+    counts = {
+        decision: sum(item["decision"] == decision for item in ordered)
+        for decision in ("recommended", "review", "skip")
+    }
+    lines = [
+        f"# Подборка вакансий — {datetime.now().astimezone():%d.%m.%Y}",
+        "",
+        f"Проанализировано: **{run.considered}**",
+        f"Стоит откликнуться: **{counts['recommended']}** · "
+        f"Посмотреть глазами: **{counts['review']}** · "
+        f"Пропустить: **{counts['skip']}**",
+        "",
+    ]
+
+    sections = (
+        ("recommended", "🔥 Стоит откликнуться"),
+        ("review", "🔎 Посмотреть глазами"),
+        ("skip", "⛔ Пропустить"),
+    )
+    for decision, heading in sections:
+        items = [item for item in ordered if item["decision"] == decision]
+        if not items:
+            continue
+        lines.extend([f"## {heading}", ""])
+        for item in items:
+            lines.extend(
+                [
+                    f"### {item['title']} — {item['score']}%",
+                    "",
+                    item["summary"],
+                    "",
+                    f"**Совпадает:** {', '.join(item['matches']) or '—'}",
+                    "",
+                    f"**Пробелы/риски:** {', '.join(item['gaps']) or '—'}",
+                    "",
+                    f"**Вывод:** {item['reason']}",
+                    "",
+                    f"**Источник:** {item['source']}",
+                ]
+            )
+            if item["url"]:
+                lines.append(f"**Ссылка:** {item['url']}")
+            lines.extend(["", "---", ""])
+
+    if not ordered:
+        lines.append("Новых вакансий для анализа за выбранный период нет.")
+    output.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")

@@ -54,6 +54,24 @@ CREATE TABLE IF NOT EXISTS collection_runs (
     error_message TEXT
 );
 
+CREATE TABLE IF NOT EXISTS vacancy_analysis (
+    message_row_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    decision TEXT NOT NULL CHECK(decision IN ('recommended', 'review', 'skip')),
+    score INTEGER NOT NULL CHECK(score BETWEEN 0 AND 100),
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    matches_json TEXT NOT NULL,
+    gaps_json TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    model TEXT NOT NULL,
+    analyzed_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_vacancy_analysis_decision
+    ON vacancy_analysis(decision);
+CREATE INDEX IF NOT EXISTS ix_vacancy_analysis_analyzed_at
+    ON vacancy_analysis(analyzed_at);
+
 DROP VIEW IF EXISTS vacancies;
 CREATE VIEW vacancies AS
 SELECT
@@ -74,7 +92,7 @@ FROM messages
 WHERE classification = 'vacancy'
   AND duplicate_of_id IS NULL;
 
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 """
 
 
@@ -242,3 +260,61 @@ class Database:
             item["has_media"] = bool(item["has_media"])
             result.append(item)
         return result
+
+    def vacancies_for_analysis(
+        self, *, since: datetime, limit: int, reanalyze: bool = False
+    ) -> list[dict[str, Any]]:
+        analyzed_filter = "" if reanalyze else "AND a.message_row_id IS NULL"
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT v.*, a.message_row_id AS already_analyzed
+                FROM vacancies v
+                LEFT JOIN vacancy_analysis a ON a.message_row_id = v.id
+                WHERE COALESCE(v.published_at, v.collected_at) >= ?
+                  {analyzed_filter}
+                ORDER BY COALESCE(v.published_at, v.collected_at) DESC, v.id DESC
+                LIMIT ?
+                """,
+                (since.astimezone(timezone.utc).isoformat(), limit),
+            ).fetchall()
+
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["links"] = json.loads(item.pop("links_json"))
+            result.append(item)
+        return result
+
+    def save_analysis(self, message_row_id: int, analysis: dict[str, Any], model: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO vacancy_analysis (
+                    message_row_id, decision, score, title, summary,
+                    matches_json, gaps_json, reason, model, analyzed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(message_row_id) DO UPDATE SET
+                    decision = excluded.decision,
+                    score = excluded.score,
+                    title = excluded.title,
+                    summary = excluded.summary,
+                    matches_json = excluded.matches_json,
+                    gaps_json = excluded.gaps_json,
+                    reason = excluded.reason,
+                    model = excluded.model,
+                    analyzed_at = excluded.analyzed_at
+                """,
+                (
+                    message_row_id,
+                    analysis["decision"],
+                    analysis["score"],
+                    analysis["title"],
+                    analysis["summary"],
+                    json.dumps(analysis["matches"], ensure_ascii=False),
+                    json.dumps(analysis["gaps"], ensure_ascii=False),
+                    analysis["reason"],
+                    model,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )

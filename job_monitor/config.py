@@ -20,6 +20,13 @@ class Config:
     poll_interval_seconds: int
     store_raw_json: bool
     log_level: str
+    groq_api_key: str | None
+    ai_model: str
+    profile_path: Path
+    report_path: Path
+    analysis_hours_back: int
+    analysis_limit: int
+    analysis_batch_size: int
 
     @classmethod
     def load(cls) -> "Config":
@@ -44,6 +51,13 @@ class Config:
             store_raw_json=os.getenv("STORE_RAW_JSON", "true").casefold()
             in {"1", "true", "yes", "on"},
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
+            groq_api_key=os.getenv("GROQ_API_KEY") or None,
+            ai_model=os.getenv("AI_MODEL", "openai/gpt-oss-120b"),
+            profile_path=Path(os.getenv("PROFILE_PATH", "profile.yaml")),
+            report_path=Path(os.getenv("REPORT_PATH", "data/daily_report.md")),
+            analysis_hours_back=int(os.getenv("ANALYSIS_HOURS_BACK", "36")),
+            analysis_limit=int(os.getenv("ANALYSIS_LIMIT", "50")),
+            analysis_batch_size=int(os.getenv("ANALYSIS_BATCH_SIZE", "10")),
         )
 
     def validate_telegram(self) -> None:
@@ -59,6 +73,19 @@ class Config:
             ("INITIAL_MAX_MESSAGES_PER_CHAT", self.initial_max_messages_per_chat),
             ("MAX_MESSAGES_PER_CHAT_PER_RUN", self.max_messages_per_chat_per_run),
             ("POLL_INTERVAL_SECONDS", self.poll_interval_seconds),
+        ):
+            if value <= 0:
+                raise RuntimeError(f"{name} должен быть больше нуля")
+
+    def validate_analysis(self) -> None:
+        if not self.groq_api_key:
+            raise RuntimeError("Не заполнена переменная GROQ_API_KEY в .env")
+        if not self.profile_path.is_file():
+            raise RuntimeError(f"Не найден профиль: {self.profile_path}")
+        for name, value in (
+            ("ANALYSIS_HOURS_BACK", self.analysis_hours_back),
+            ("ANALYSIS_LIMIT", self.analysis_limit),
+            ("ANALYSIS_BATCH_SIZE", self.analysis_batch_size),
         ):
             if value <= 0:
                 raise RuntimeError(f"{name} должен быть больше нуля")
