@@ -2,5 +2,5 @@ Telethon==1.45.0
 python-dotenv==1.1.1
 qrcode==8.2
 openai==1.109.1
-pydantic==2.11.9
+pydantic==2.13.3
 PyYAML==6.0.2
