@@ -278,9 +278,15 @@ class Database:
         return result
 
     def vacancies_for_analysis(
-        self, *, since: datetime, limit: int, reanalyze: bool = False
+        self, *, since: datetime, limit: int | None, reanalyze: bool = False
     ) -> list[dict[str, Any]]:
         analyzed_filter = "" if reanalyze else "AND a.message_row_id IS NULL"
+        limit_clause = "LIMIT ?" if limit is not None else ""
+        parameters: tuple[Any, ...] = (
+            (since.astimezone(timezone.utc).isoformat(), limit)
+            if limit is not None
+            else (since.astimezone(timezone.utc).isoformat(),)
+        )
         with self.connect() as connection:
             rows = connection.execute(
                 f"""
@@ -290,9 +296,9 @@ class Database:
                 WHERE COALESCE(v.published_at, v.collected_at) >= ?
                   {analyzed_filter}
                 ORDER BY COALESCE(v.published_at, v.collected_at) DESC, v.id DESC
-                LIMIT ?
+                {limit_clause}
                 """,
-                (since.astimezone(timezone.utc).isoformat(), limit),
+                parameters,
             ).fetchall()
 
         result = []

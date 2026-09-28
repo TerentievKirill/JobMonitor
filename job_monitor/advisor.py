@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from .config import Config
 from .database import Database
+from .filters import analysis_priority
 
 
 logger = logging.getLogger("job-monitor")
@@ -40,6 +41,7 @@ class AssessmentBatch(BaseModel):
 class AnalysisRun:
     considered: int
     assessments: list[dict]
+    locally_skipped: int = 0
 
 
 SYSTEM_PROMPT = """You are a pragmatic job-search advisor for one QA automation engineer.
@@ -127,11 +129,26 @@ def analyze(config: Config, database: Database, *, reanalyze: bool = False) -> A
     config.validate_analysis()
     profile = load_profile(config.profile_path)
     since = datetime.now(timezone.utc) - timedelta(hours=config.analysis_hours_back)
-    vacancies = database.vacancies_for_analysis(
-        since=since, limit=config.analysis_limit, reanalyze=reanalyze
+    pending = database.vacancies_for_analysis(
+        since=since, limit=None, reanalyze=reanalyze
     )
+    ranked: list[tuple[int, dict]] = []
+    for vacancy in pending:
+        priority = analysis_priority(vacancy["text"])
+        if priority is not None:
+            ranked.append((priority, vacancy))
+
+    ranked.sort(
+        key=lambda item: (
+            -item[0],
+            item[1]["published_at"] or item[1]["collected_at"],
+            item[1]["id"],
+        )
+    )
+    vacancies = [vacancy for _, vacancy in ranked[: config.analysis_limit]]
+    locally_skipped = len(pending) - len(ranked)
     if not vacancies:
-        return AnalysisRun(considered=0, assessments=[])
+        return AnalysisRun(considered=0, assessments=[], locally_skipped=locally_skipped)
 
     client = OpenAI(
         api_key=config.groq_api_key,
@@ -172,7 +189,11 @@ def analyze(config: Config, database: Database, *, reanalyze: bool = False) -> A
             )
             time.sleep(config.analysis_pause_seconds)
 
-    return AnalysisRun(considered=len(vacancies), assessments=saved)
+    return AnalysisRun(
+        considered=len(vacancies),
+        assessments=saved,
+        locally_skipped=locally_skipped,
+    )
 
 
 def write_report(run: AnalysisRun, output: Path) -> None:
@@ -186,6 +207,7 @@ def write_report(run: AnalysisRun, output: Path) -> None:
         f"# Подборка вакансий — {datetime.now().astimezone():%d.%m.%Y}",
         "",
         f"Проанализировано: **{run.considered}**",
+        f"Не отправлено в Groq локальным фильтром: **{run.locally_skipped}**",
         f"Стоит откликнуться: **{counts['recommended']}** · "
         f"Посмотреть глазами: **{counts['review']}** · "
         f"Пропустить: **{counts['skip']}**",

@@ -108,12 +108,14 @@ def main() -> None:
         run = analyze(config, database, reanalyze=args.reanalyze)
         write_report(run, config.report_path)
         print(f"Проанализировано вакансий: {run.considered}")
+        print(f"Не отправлено в Groq локальным фильтром: {run.locally_skipped}")
         print(f"Отчёт: {config.report_path.resolve()}")
     elif args.command == "daily":
         asyncio.run(collect_once(config, database))
         run = analyze(config, database, reanalyze=args.reanalyze)
         write_report(run, config.report_path)
         print(f"Проанализировано вакансий: {run.considered}")
+        print(f"Не отправлено в Groq локальным фильтром: {run.locally_skipped}")
         print(f"Отчёт: {config.report_path.resolve()}")
     elif args.command == "export":
         export_json(database, args.output)
