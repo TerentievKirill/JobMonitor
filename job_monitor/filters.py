@@ -55,15 +55,28 @@ def fingerprint(text: str) -> str:
 
 
 def analysis_priority(text: str, profile: dict | None = None) -> int | None:
-    """Return local QA relevance score, or None when Groq should not see the text."""
-    if profile and profile.get("candidate", {}).get("search_keywords"):
-        keywords = profile["candidate"]["search_keywords"]
-        if not any(re.search(r"(?i)(?<![\w])" + re.escape(str(word)) + r"(?![\w])", text) for word in keywords):
+    """Preselect by actual technology, not generic backend job titles."""
+    candidate = (profile or {}).get("candidate", {})
+    keywords = candidate.get("search_keywords")
+    if keywords:
+        matches = {
+            word.casefold()
+            for word in keywords
+            if re.search(r"(?i)(?<![\\w])" + re.escape(str(word)) + r"(?![\\w])", text)
+        }
+        if not matches:
             return None
-        return 100 + sum(20 for word in keywords if re.search(r"(?i)(?<![\w])" + re.escape(str(word)) + r"(?![\w])", text))
+        # Elixir/Phoenix is preferred; Ruby/Rails is also eligible.
+        priority = 100 + 20 * len(matches)
+        if matches & {"elixir", "phoenix"}:
+            priority += 50
+        if matches & {"ruby", "ruby on rails", "rails"}:
+            priority += 20
+        if re.search(r"(?i)\\b(?:remote|worldwide|global|удал[её]нн|relocation|contractor|b2b)\\b", text):
+            priority += 8
+        return priority
     if not any(pattern.search(text) for pattern in QA_ROLE_PATTERNS):
         return None
-
     score = 100
     for pattern, weight in PRIORITY_MARKERS:
         if pattern.search(text):
