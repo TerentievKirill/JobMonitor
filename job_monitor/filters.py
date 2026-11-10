@@ -58,9 +58,9 @@ def analysis_priority(text: str, profile: dict | None = None) -> int | None:
     """Return local QA relevance score, or None when Groq should not see the text."""
     if profile and profile.get("candidate", {}).get("search_keywords"):
         keywords = profile["candidate"]["search_keywords"]
-        if not any(re.search(r"(?i)(?<![\\w])" + re.escape(str(word)) + r"(?![\\w])", text) for word in keywords):
+        if not any(re.search(r"(?i)(?<![\w])" + re.escape(str(word)) + r"(?![\w])", text) for word in keywords):
             return None
-        return 100 + sum(20 for word in keywords if re.search(r"(?i)(?<![\\w])" + re.escape(str(word)) + r"(?![\\w])", text))
+        return 100 + sum(20 for word in keywords if re.search(r"(?i)(?<![\w])" + re.escape(str(word)) + r"(?![\w])", text))
     if not any(pattern.search(text) for pattern in QA_ROLE_PATTERNS):
         return None
 
