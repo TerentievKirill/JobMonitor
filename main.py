@@ -53,7 +53,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Сборщик вакансий из Telegram")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("auth", help="Создать Telegram-сессию")
-    subparsers.add_parser("collect-once", help="Выполнить один сбор")
+    collect_parser = subparsers.add_parser("collect-once", help="Выполнить один сбор")
+    collect_parser.add_argument(
+        "--backfill-days", type=int, metavar="DAYS",
+        help="Дозагрузить историю Telegram за указанное число дней, включая уже прочитанные каналы",
+    )
     subparsers.add_parser("run", help="Запустить постоянный сбор")
     subparsers.add_parser("collect-web", help="Собрать вакансии с внешних сайтов")
     subparsers.add_parser("stats", help="Показать статистику SQLite")
@@ -83,6 +87,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.command == "collect-once" and args.backfill_days is not None and args.backfill_days <= 0:
+        parser.error("--backfill-days должен быть больше нуля")
+
     config = Config.load()
     configure_logging(config.log_level)
     database = Database(config.database_path)
@@ -91,7 +98,7 @@ def main() -> None:
     if args.command == "auth":
         asyncio.run(authenticate(config))
     elif args.command == "collect-once":
-        asyncio.run(collect_once(config, database))
+        asyncio.run(collect_once(config, database, backfill_days=args.backfill_days))
     elif args.command == "collect-web":
         print(f"Добавлено вакансий с сайтов: {collect_web(database)}")
     elif args.command == "run":
