@@ -121,26 +121,41 @@ def request_assessments(client: OpenAI, model: str, profile: dict, batch: list[d
         "candidate_profile": profile,
         "vacancies": [compact_vacancy(vacancy) for vacancy in batch],
     }
-    try:
-        response = client.beta.chat.completions.parse(
-            model=model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-            ],
-            response_format=AssessmentBatch,
-        )
-    except BadRequestError as error:
-        if "json_validate_failed" not in str(error) or len(batch) == 1:
-            raise
-        middle = len(batch) // 2
-        logger.warning(
-            "Groq вернул некорректный JSON; дробим пакет из %d вакансий",
-            len(batch),
-        )
-        return request_assessments(client, model, profile, batch[:middle]) + request_assessments(
-            client, model, profile, batch[middle:]
-        )
+    for attempt in range(1, 4):
+        try:
+            response = client.beta.chat.completions.parse(
+                model=model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+                ],
+                response_format=AssessmentBatch,
+            )
+            break
+        except BadRequestError as error:
+            if "json_validate_failed" not in str(error):
+                raise
+            if attempt < 3:
+                logger.warning(
+                    "Groq вернул JSON не по схеме (попытка %d/3); повторяем запрос",
+                    attempt,
+                )
+                time.sleep(5)
+                continue
+            if len(batch) > 1:
+                middle = len(batch) // 2
+                logger.warning(
+                    "Groq трижды вернул некорректный JSON; дробим пакет из %d вакансий",
+                    len(batch),
+                )
+                return request_assessments(client, model, profile, batch[:middle]) + request_assessments(
+                    client, model, profile, batch[middle:]
+                )
+            logger.error(
+                "Groq трижды вернул некорректный JSON для вакансии %s; пропускаем её",
+                batch[0]["id"],
+            )
+            return []
 
     parsed = response.choices[0].message.parsed
     if parsed is None:
@@ -193,7 +208,7 @@ def analyze(config: Config, database: Database, *, reanalyze: bool = False) -> A
         assessments = request_assessments(client, config.ai_model, profile, batch)
         batch_ids = {vacancy["id"] for vacancy in batch}
         returned_ids = {item.message_row_id for item in assessments}
-        if returned_ids != batch_ids or not returned_ids <= known_ids:
+        if assessments and (returned_ids != batch_ids or not returned_ids <= known_ids):
             raise RuntimeError(
                 f"Groq вернул неверный набор ID: ожидались {sorted(batch_ids)}, "
                 f"получены {sorted(returned_ids)}"
