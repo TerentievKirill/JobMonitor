@@ -28,6 +28,8 @@ class Config:
     analysis_limit: int
     analysis_batch_size: int
     analysis_pause_seconds: int
+    collect_web_sources: bool
+    enrich_external_links: bool
 
     @classmethod
     def load(cls) -> "Config":
@@ -60,6 +62,8 @@ class Config:
             analysis_limit=int(os.getenv("ANALYSIS_LIMIT", "50")),
             analysis_batch_size=int(os.getenv("ANALYSIS_BATCH_SIZE", "3")),
             analysis_pause_seconds=int(os.getenv("ANALYSIS_PAUSE_SECONDS", "20")),
+            collect_web_sources=os.getenv("COLLECT_WEB_SOURCES", "false").lower() in {"true", "1", "yes"},
+            enrich_external_links=os.getenv("ENRICH_EXTERNAL_LINKS", "false").lower() in {"true", "1", "yes"},
         )
 
     def validate_telegram(self) -> None:
