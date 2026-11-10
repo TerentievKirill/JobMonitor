@@ -4,3 +4,4 @@ qrcode==8.2
 openai==1.109.1
 pydantic==2.13.3
 PyYAML==6.0.2
+beautifulsoup4==4.14.2
