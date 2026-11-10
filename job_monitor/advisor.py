@@ -136,6 +136,13 @@ def analyze(config: Config, database: Database, *, reanalyze: bool = False) -> A
     ranked: list[tuple[int, dict]] = []
     for vacancy in pending:
         priority = analysis_priority(vacancy["text"], profile)
+        # Short Telegram posts may only link to an external job description.
+        if priority is None and config.enrich_external_links and len(vacancy["text"]) < 800:
+            candidates = vacancy.get("links") or []
+            if candidates and any(word in vacancy["text"].casefold() for word in
+                                  ("job", "vacan", "ваканс", "hiring", "position", "developer", "engineer")):
+                vacancy = enrich(vacancy)
+                priority = analysis_priority(vacancy["text"], profile)
         if priority is not None:
             ranked.append((priority, vacancy))
 
@@ -146,7 +153,7 @@ def analyze(config: Config, database: Database, *, reanalyze: bool = False) -> A
             item[1]["id"],
         )
     )
-    vacancies = [enrich(vacancy) if config.enrich_external_links else vacancy for _, vacancy in ranked[: config.analysis_limit]]
+    vacancies = [enrich(vacancy) if config.enrich_external_links and not vacancy.get("external_url") else vacancy for _, vacancy in ranked[: config.analysis_limit]]
     locally_skipped = len(pending) - len(ranked)
     if not vacancies:
         return AnalysisRun(considered=0, assessments=[], locally_skipped=locally_skipped)
