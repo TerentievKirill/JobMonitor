@@ -12,6 +12,7 @@ from job_monitor.advisor import analyze, write_report
 from job_monitor.database import Database
 from job_monitor.service import run_forever
 from job_monitor.telegram import authorize, collect_once, export_source_links
+from job_monitor.web_sources import collect_web
 
 
 def configure_logging(level: str) -> None:
@@ -54,6 +55,7 @@ def main() -> None:
     subparsers.add_parser("auth", help="Создать Telegram-сессию")
     subparsers.add_parser("collect-once", help="Выполнить один сбор")
     subparsers.add_parser("run", help="Запустить постоянный сбор")
+    subparsers.add_parser("collect-web", help="Собрать вакансии с внешних сайтов")
     subparsers.add_parser("stats", help="Показать статистику SQLite")
     sources_parser = subparsers.add_parser(
         "sources", help="Сохранить публичные ссылки на источники из Telegram-папки"
@@ -90,6 +92,8 @@ def main() -> None:
         asyncio.run(authenticate(config))
     elif args.command == "collect-once":
         asyncio.run(collect_once(config, database))
+    elif args.command == "collect-web":
+        print(f"Добавлено вакансий с сайтов: {collect_web(database)}")
     elif args.command == "run":
         try:
             asyncio.run(run_forever(config, database))
@@ -112,6 +116,8 @@ def main() -> None:
         print(f"Отчёт: {config.report_path.resolve()}")
     elif args.command == "daily":
         asyncio.run(collect_once(config, database))
+        if config.collect_web_sources:
+            collect_web(database)
         run = analyze(config, database, reanalyze=args.reanalyze)
         write_report(run, config.report_path)
         print(f"Проанализировано вакансий: {run.considered}")
