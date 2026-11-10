@@ -209,7 +209,11 @@ async def messages_to_collect(
     return list(reversed(newest_first))
 
 
-async def collect_once(config: Config, database: Database) -> dict[str, int]:
+async def collect_once(
+    config: Config, database: Database, *, backfill_days: int | None = None
+) -> dict[str, int]:
+    if backfill_days is not None and backfill_days <= 0:
+        raise ValueError("backfill_days должен быть больше нуля")
     config.validate_telegram()
     config.session_path.parent.mkdir(parents=True, exist_ok=True)
     database.initialize()
@@ -223,6 +227,10 @@ async def collect_once(config: Config, database: Database) -> dict[str, int]:
         "errors": 0,
     }
     run_id = database.start_run()
+    backfill_cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=backfill_days)
+        if backfill_days is not None else None
+    )
     client = TelegramClient(str(config.session_path), config.api_id, config.api_hash)
 
     try:
@@ -240,7 +248,15 @@ async def collect_once(config: Config, database: Database) -> dict[str, int]:
             source_inserted = 0
             try:
                 last_id = database.last_message_id(channel_id)
-                messages = await messages_to_collect(client, entity, last_id, config)
+                if backfill_cutoff is not None:
+                    messages = []
+                    async for message in client.iter_messages(entity):
+                        if message.date and message.date < backfill_cutoff:
+                            break
+                        messages.append(message)
+                    messages.reverse()
+                else:
+                    messages = await messages_to_collect(client, entity, last_id, config)
                 source_received = len(messages)
                 stats["received"] += source_received
 
