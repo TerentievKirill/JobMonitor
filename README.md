@@ -257,3 +257,39 @@ pytest
 
 `python collector.py` оставлен как совместимый псевдоним для одного сбора.
 `filter_vacancies.py` можно использовать для старых выгрузок `messages.jsonl`.
+
+## Ветка ivan: международные вакансии
+
+Для отдельной установки используй ветку `ivan`, собственную папку Telegram
+`Работа Иван`, отдельную SQLite-базу и сессию. Профиль `profile.yaml`
+ориентирован на Elixir/Phoenix/Ruby/Rails и удалённую работу из Грузии.
+
+В `.env` установи:
+
+```dotenv
+TELEGRAM_FOLDER=Работа Иван
+COLLECT_WEB_SOURCES=true
+ENRICH_EXTERNAL_LINKS=true
+```
+
+Дополнительные источники:
+- ElixirJobs.net — https://elixirjobs.net/rss
+- Rails Job Board — https://jobs.rubyonrails.org/jobs.rss
+- Work From Anywhere Ruby — https://workfromanywhere.app/remote-ruby-jobs
+
+```bash
+pip install -r requirements.txt
+python main.py collect-web
+python main.py daily
+pytest tests/test_web_sources.py
+```
+
+`collect-web` сохраняет вакансии с сайтов в общую SQLite-базу; `daily`
+собирает и Telegram, и сайты при включённом `COLLECT_WEB_SOURCES`.
+Внешние ссылки Telegram раскрываются перед Groq при включённом
+`ENRICH_EXTERNAL_LINKS`. Если страница недоступна, анализ использует
+исходный Telegram-текст. Доступны только публичные HTTPS-страницы;
+не поддерживаются страницы с авторизацией и JavaScript-only контентом.
+
+**Внимание:** первая версия интеграции требует локального прогона и проверки
+на живых источниках; автоматические тесты не подтверждают доступность сайтов.
