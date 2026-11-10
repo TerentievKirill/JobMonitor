@@ -1,10 +1,15 @@
 candidate:
   target_roles:
+    - Backend Developer
+    - Senior Backend Engineer
+    - Staff Engineer
+    - Tech Lead
+    - Technical Architect
+    - Software Architect
     - Elixir Developer
     - Phoenix Developer
     - Ruby Developer
     - Ruby on Rails Developer
-    - Backend Engineer
   search_keywords:
     - Elixir
     - Phoenix
@@ -14,17 +19,36 @@ candidate:
     - Elixir
     - Phoenix
     - Ruby
+    - Ruby on Rails
   geography:
-    residence: Georgia
+    residence: Georgia (country, not US state)
     preferred:
       - Worldwide remote
-      - Remote explicitly open to Georgia
-    relocation: false
+      - Remote explicitly open to Georgia (country)
+      - International B2B or independent contractor from Georgia
+      - Relocation opportunities
+    relocation: true
+    contractor_allowed: true
   preferences:
-    remote_only: true
+    remote_preferred: true
+    mixed_stack_allowed: true
+    english_restrictions: none
+    minimum_salary: none
+    seniority: flexible
 
 evaluation_rules:
-  recommended: Strong technical fit AND explicit eligibility to work remotely from Georgia.
-  review: Relevant role, but location eligibility, experience requirements, or core skills are unclear.
-  skip: Core stack mismatch, mandatory office work, or explicit geographic restriction excluding Georgia.
-  principle: Do not assume 'remote' means worldwide. Missing location policy is not confirmation.
+  recommended: >
+    Strong match with Elixir/Phoenix (first priority) or Ruby/Rails (second
+    priority), and explicit permission to work from Georgia (country), an
+    international contractor arrangement, or relocation support.
+  review: >
+    Relevant technical role, but geographic eligibility, relocation terms,
+    contractor arrangements, or core technology requirements are unclear.
+  skip: >
+    No meaningful Elixir/Phoenix/Ruby/Rails involvement, or a hard geographic
+    restriction excluding Georgia with no relocation or contractor option.
+  principle: >
+    This is a broad three-day trial. Do not require a specific seniority,
+    salary, or language. Georgia always means the country, never the US state.
+    US-only or EU-only remote is not worldwide remote. Do not assume that
+    contractor status or relocation is possible without evidence.
